@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: spring-boot-base-project
+
+  datasource:
+    url: ${DATASOURCE_URL}
+    username: ${DATASOURCE_USERNAME}
+    password: ${DATASOURCE_PASSWORD}
+    driver-class-name: ${DATASOURCE_DRIVER_CLASSNAME}
+
+  flyway:
+    enabled: ${FLYWAY_ENABLED}
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE}
+
+server:
+  port: ${SERVER_PORT}
+  servlet:
+    context-path: /api
+
+springdoc:
+  swagger-ui:
+    use-root-path: true
+
+api:
+  secret-key: ${API_SECRET_KEY}
+  expiration-token: ${API_EXPIRATION_TOKEN}

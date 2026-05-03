@@ -1,0 +1,12 @@
+{"properties": [
+  {
+    "name": "api.secret-key",
+    "type": "java.lang.String",
+    "description": "Secret key for JWT Tokens"
+  },
+  {
+    "name": "api.expiration-token",
+    "type": "java.lang.String",
+    "description": "Expiration token time in minutes"
+  }
+]}
