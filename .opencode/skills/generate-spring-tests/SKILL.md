@@ -5,274 +5,306 @@ description: Generate unit and controller tests for Spring Boot APIs using Mocki
 
 # Generate Spring Boot Tests
 
-You generate automated tests for Spring Boot applications using Mockito and MockMvc.
-
-## When to use this skill
-
-Use this skill when:
-
-* The user provides or references a Java class
-* The goal is to generate test classes
-* The code uses Spring Boot annotations like `@Service` or `@RestController`
+Generate automated tests for Spring Boot applications using Mockito and MockMvc.
 
 ---
 
-## Step 1 — Identify class type
+# Step 1 — Identify class type and test strategy
 
-Analyze the Java source code and detect:
+| Annotation | Strategy | Key Setup |
+|---|---|---|
+| `@Service` | Unit test (Mockito) | `@ExtendWith(MockitoExtension.class)`, `@Mock`, `@InjectMocks` — no Spring context |
+| `@RestController` | Controller test (MockMvc) | `@WebMvcTest(ClassName.class)`, `MockMvc`, `@MockBean` for services |
+| `@RestControllerAdvice` | MockMvc only | `@WebMvcTest` + minimal test controller that throws the exception — no direct method calls on the handler |
 
-* `@Service` → unit test (Mockito)
-* `@RestController` → controller test (MockMvc)
-
----
-
-## Step 2 — Extract dependencies
-
-* Identify all `private final` fields
-* These must be mocked in tests
+Identify all `private final` fields in the class under test — each becomes a `@Mock` or `@MockBean`.
 
 ---
 
-## Step 3 — Choose test strategy
+# Step 2 — Define test cases per method
 
-### For @Service classes
+For each public method, generate only the cases that have distinct observable behavior:
 
-* Use `@ExtendWith(MockitoExtension.class)`
-* Use `@Mock` for dependencies
-* Use `@InjectMocks` for the class under test
-* Do NOT start Spring context
+1. **Success case** — valid input, mock returns expected result
+2. **Failure case** — invalid or missing input, mock throws exception or returns empty
+3. **Edge case** — only when the method has explicit branching for it (e.g., `Optional.empty()`, boundary values)
 
----
+> Do not generate a test case just to increase coverage. A case is only justified if its outcome differs from existing cases.
 
-### For @RestController classes
-
-* Use `@WebMvcTest(ClassName.class)`
-* Use `MockMvc`
-* Use `@MockBean` for services
+Treat `Optional.empty()` as a distinct observable behavior when it changes the execution flow.
 
 ---
 
-## Step 4 — Generate test cases
+# Step 3 — Naming convention
 
-For each public method, generate:
+Use the pattern:
 
-1. Success case
-2. Failure case (exception or invalid scenario)
-3. Edge case (if applicable)
-
----
-
-## Step 5 — Naming convention
-
-Use:
-
+```java
 should<ExpectedResult>When<Condition>
+````
 
 Examples:
 
-* shouldReturnUserWhenExists
-* shouldThrowExceptionWhenUserNotFound
-
----
-
-## Step 6 — Heuristics
-
-### Optional return types
-
-If method returns Optional:
-
-* Generate success test → `Optional.of(...)`
-* Generate failure test → `Optional.empty()`
-
----
-
-### Methods containing "save"
-
-* Validate persistence behavior
-* Ensure returned object matches expected
-
----
-
-### Validation annotations
-
-If input validation is detected:
-
-* Generate invalid input test cases
-
----
-
-## Step 7 — Assertions and mocking
-
-* Use `Mockito.when(...).thenReturn(...)`
-* Use `Assertions` or `AssertJ`
-* Validate response fields and behavior
-
----
-
-## Step 8 — Output requirements
-
-* Generate a full test class
-* Include imports
-* Follow naming convention:
-
-<ClassName>Test
-
----
-
-## Step 9 — Avoid false positive tests (CRITICAL)
-
-Do not generate tests that always pass regardless of input.
-
-### Forbidden patterns
-
-Avoid mocks like:
-
 ```java
-when(service.method(any()))
-    .thenThrow(...)
+shouldReturnUserWhenExists
+shouldThrowNotFoundWhenUserMissing
+shouldReturnBadRequestWhenPayloadInvalid
 ```
 
-or
+---
+
+# Step 4 — Mock isolation (CRITICAL)
+
+Each test must have its own focused mock setup.
+
+Never write a single mock that conditionally handles multiple scenarios via `thenAnswer` with `if/else` branching.
+
+## Forbidden
 
 ```java
-when(service.method(any()))
-    .thenReturn(...)
+when(service.find(any())).thenAnswer(invocation -> {
+    String id = invocation.getArgument(0);
+
+    if (id == null) {
+        throw new NotFoundException();
+    }
+
+    return result;
+});
 ```
 
-These patterns ignore input and create false-positive tests.
-
----
-
-### Required behavior
-
-Mocks MUST reflect input conditions.
-
-Use argument-based logic when needed:
+## Required
 
 ```java
-when(service.method(any()))
-    .thenAnswer(invocation -> {
-        InputType input = invocation.getArgument(0);
+// success test
+when(service.find(eq(VALID_ID)))
+    .thenReturn(expectedUser);
 
-        if (invalidCondition(input)) {
-            throw new RuntimeException();
-        }
-
-        return validResult;
-    });
+// failure test
+when(service.find(eq(UNKNOWN_ID)))
+    .thenThrow(new NotFoundException());
 ```
 
-Controller test rules
+Use specific matchers (`eq(...)`) over `any()` whenever the input value is known.
 
-When testing controllers:
+Reserve `any()` only when the argument value is genuinely irrelevant to the behavior being tested.
 
-* Only mock the service behavior
-* Do NOT simulate business rules blindly
-* Ensure test input matches expected scenario
+Do not use `lenient()`.
 
----
-
-### Required test consistency
-
-Each test must be logically consistent:
-
-| Scenario | Input      | Mock Behavior  | Expected Result |
-| -------- | ---------- | -------------- | --------------- |
-| Success  | valid data | return success | 2xx             |
-| Failure  | invalid    | throw error    | 4xx             |
+Remove unused stubs instead of suppressing warnings.
 
 ---
 
-### Validation rule
+# Step 5 — Assertions: one behavior per test
 
-If the test input is valid, the mock MUST NOT throw an exception.
+Each test must assert exactly what it is named after — no more.
 
-If the test input is invalid, the mock MUST simulate failure.
+## Unit tests
 
----
+Use AssertJ:
 
-### Anti-pattern detection
+```java
+assertThat(...)
+assertThatThrownBy(...)
+```
 
-Before generating the test, verify:
+## Controller tests
 
-Does the mock depend on input?
-Does the test scenario match the expected outcome?
+Use:
 
-If not, adjust the mock.
+```java
+status()
+jsonPath()
+content()
+```
 
----
+Controller tests must always validate:
 
-## Step 10 — Prefer real validation when possible
+* HTTP status
+* response content type when applicable
+* only the relevant response fields for the scenario
 
-If validation logic is simple and local (e.g. enum, string match, list validation):
+## Constants
 
-* Prefer NOT mocking the service blindly
-* Simulate realistic behavior based on input
+Use constants from the codebase instead of magic values.
 
----
+### Good
 
-## Step 11 — Output requirements
+```java
+assertThat(response.getStatus())
+    .isEqualTo(AppConstants.SC_GENERIC_ERROR);
+```
 
-Generate a full test class
-* Include imports
-* Follow naming convention:
+### Bad
 
-<ClassName>Test
+```java
+assertThat(response.getStatus())
+    .isEqualTo(-99);
+```
 
----
+## Structural contract tests
 
-## Step 12 — Ensure mock consistency with input (CRITICAL)
+Create only one structural contract test per response type.
 
-Mocks must reflect realistic data behavior.
+This test validates that all expected response fields exist.
 
-Do NOT create mocks that contradict the test input.
+All other tests must assert only the field(s) relevant to the behavior being tested.
 
-### Example of WRONG behavior
-
-Input:
-- roles = ["ROLE_ADMIN"]
-
-Mock:
-- repository returns empty set
-
-This creates an unrealistic scenario and invalid test.
-
----
-
-### Required behavior
-
-Mocks must be consistent with input:
-
-| Input            | Mock result              |
-|------------------|--------------------------|
-| Valid role       | return matching entity   |
-| Invalid role     | return empty             |
+> Asserting unrelated fields in a behavioral test is noise and creates fragile tests.
 
 ---
 
-### Rule
+# Step 6 — Interaction verification
 
-If the input represents valid data, the mock must simulate a successful lookup.
+Use `verify(...)` only when the interaction itself is part of the behavior being tested.
 
-If the input represents invalid data, the mock must simulate failure.
+## Good examples
 
----
+* ensuring a fallback method is called
+* ensuring an event is published
+* ensuring a retry does not happen
 
-### Anti-pattern
+## Avoid
 
-Never simulate "not found" for known valid values.
+```java
+verify(repository).save(any());
+verify(service).find(any());
+```
 
----
-
-## Constraints
-
-* Do NOT access real database
-* Do NOT use `@SpringBootTest` unless explicitly required
-* Keep tests isolated and fast
-* Do NOT add redundant dependencies if spring-boot-starter-test is already present
+unless the interaction itself is the business rule.
 
 ---
 
-## Goal
+# Step 7 — Validation tests
 
-Produce clean, maintainable, and production-ready test code following Spring Boot best practices.
+Prefer real Spring validation over manually constructing framework exceptions.
+
+## Good
+
+```java
+mockMvc.perform(post("/users")
+        .content("{}")
+        .contentType(APPLICATION_JSON))
+    .andExpect(status().isBadRequest());
+```
+
+## Bad
+
+```java
+MethodArgumentNotValidException ex =
+    mock(MethodArgumentNotValidException.class);
+
+handler.handleValidationException(ex);
+```
+
+Validation tests must exercise the real HTTP validation flow.
+
+---
+
+# Step 8 — Object creation and over-mocking
+
+Do not mock:
+
+* DTOs
+* entities
+* collections
+* value objects
+
+Instantiate real objects whenever possible.
+
+Mock only:
+
+* external collaborators
+* gateways
+* repositories
+* expensive dependencies
+* integrations
+
+When object setup becomes repetitive:
+
+* extract helper methods
+* prefer semantic builders
+
+Examples:
+
+```java
+buildUser()
+buildValidRequest()
+buildResponse()
+```
+
+Avoid large inline object construction inside tests.
+
+---
+
+# Step 9 — Private methods
+
+Never test private methods directly.
+
+Private behavior must be exercised through public methods.
+
+Do not use reflection to invoke private methods.
+
+---
+
+# Step 10 — Deterministic tests
+
+Never use:
+
+```java
+LocalDate.now()
+LocalDateTime.now()
+new Date()
+```
+
+directly in tests.
+
+Prefer fixed values to keep tests deterministic and non-flaky.
+
+---
+
+# Step 11 — Exception assertions
+
+Avoid asserting full exception messages unless the exact message is part of the business contract.
+
+Prefer asserting:
+
+* exception type
+* error code
+* response field
+* status code
+
+over complete message text.
+
+---
+
+# Step 12 — Nested tests
+
+Use `@Nested` only when a method has multiple clearly separated behavioral groups.
+
+Avoid excessive nesting.
+
+---
+
+# Step 13 — Avoid low-value tests
+
+Do not generate tests for:
+
+* trivial getters/setters
+* Lombok-generated behavior
+* simple DTO mappings with no logic
+* framework behavior already covered by Spring
+* repository CRUD behavior already guaranteed by JPA
+
+Focus on business behavior and observable outcomes.
+
+---
+
+# Step 14 — Output requirements
+
+* Generate a full test class with all imports
+* Class name: `<ClassName>Test`
+* Do not use `@SpringBootTest`
+* Do not add dependencies already provided by `spring-boot-starter-test`
+* Keep each test method under ~15 lines
+* If a test becomes too long, extract setup helpers or split responsibilities
